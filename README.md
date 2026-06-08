@@ -227,6 +227,3 @@ Math Terminal 并不替代 AI 模型本身，而是作为命令行 AI 工具的�
 
 项目核心功能、界面逻辑、AI 输出捕获、Markdown/数学公式规范化和预览面板均为项目实现内容。
 
-## License
-
-如需开源发布，建议在仓库中补充 LICENSE 文件，例如 MIT License。
