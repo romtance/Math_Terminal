@@ -1,0 +1,57 @@
+{
+  "name": "math-terminal",
+  "version": "0.1.0",
+  "description": "Cross-platform terminal with TeX and Markdown preview.",
+  "main": "out/main/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "latest",
+    "@xterm/xterm": "latest",
+    "dompurify": "latest",
+    "katex": "latest",
+    "markdown-it": "latest",
+    "node-pty": "latest"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "latest",
+    "@types/node": "latest",
+    "electron": "latest",
+    "electron-builder": "latest",
+    "electron-vite": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "vitest": "latest"
+  },
+  "build": {
+    "appId": "dev.mathterminal.app",
+    "productName": "Math Terminal",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "icon": "icon.png",
+    "win": {
+      "target": ["portable"],
+      "icon": "icon.png",
+      "signAndEditExecutable": false
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    }
+  }
+}
