@@ -278,6 +278,26 @@ $$
     expect(html).not.toContain('katex-error');
   });
 
+  it('renders consecutive single-dollar formulas separately', () => {
+    const html = renderMarkdown(String.raw`例如：
+
+$A=\begin{pmatrix}2&3\\1&4\end{pmatrix}$
+
+$|A|=2\cdot4-3\cdot1=8-3=5$
+
+显示效果：
+
+$A=\begin{pmatrix}2&3\\1&4\end{pmatrix}$
+
+$|A|=2\cdot4-3\cdot1=8-3=5$`);
+
+    expect(html).toContain('katex');
+    expect(html).toContain('mtable');
+    expect(html).not.toContain('katex-error');
+    expect(html).not.toContain('color:#cc0000');
+    expect(html).toContain('显示效果');
+  });
+
   it('does not render raw HTML as HTML', () => {
     const html = renderMarkdown('<script>alert(1)</script>');
 

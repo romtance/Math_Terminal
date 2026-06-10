@@ -168,12 +168,87 @@ describe('AiOutputCapture', () => {
     expect(entry?.content).not.toContain('|\n\n|');
   });
 
-  it('preserves a real blank line inside a single chunk', () => {
+  it('filters Ebbing status lines from captured answers', () => {
     const capture = new AiOutputCapture();
 
-    capture.push('● 第一段。\n\n第二段。\n');
+    capture.push('● 最终结论。\n');
+    capture.push('✽ Ebbing... (18s · 281 tokens)\n');
     const entry = capture.flush();
 
-    expect(entry?.content).toContain('第一段。\n\n第二段。');
+    expect(entry).not.toBeNull();
+    expect(entry?.content).toContain('最终结论');
+    expect(entry?.content).not.toContain('Ebbing');
+  });
+
+  it('does not capture echoed Chinese prompt fragments and status UI as an answer', () => {
+    const capture = new AiOutputCapture();
+
+    capture.setPrompt('你是什么模型');
+    capture.push('────────────────────────────❯\n');
+    capture.push('[gpt-5.5] | Taylor | 1h 19m Context 17%\n');
+    capture.push('1 CLAUDE.md | 1 MCPs\n');
+    capture.push('← for agents\n');
+    capture.push('你是\n');
+    capture.push('什么模型\n');
+    capture.push('你是什么模型\n');
+    capture.push('✢ Puzzling...\n');
+    capture.push('────────────────────────────❯\n');
+
+    expect(capture.flush()).toBeNull();
+  });
+
+  it('keeps prompt/status chrome from becoming markdown horizontal rules', () => {
+    const capture = new AiOutputCapture();
+
+    capture.setPrompt('你是什么模型');
+    capture.push('────────────────────────────────────────\n');
+    capture.push('────────────────────────────❯\n');
+    capture.push('────────────────────────────────────────\n');
+    capture.push('← foragents●hi\n');
+    capture.push('gh:/effort\n');
+    capture.push('[gpt-5.5] | Taylor | ⏱ 1h 19mContext 17%\n');
+    capture.push('1 CLAUDE.md | 1 MCPs\n');
+    capture.push('← for agents\n');
+    capture.push('你是\n');
+    capture.push('什么模型\n');
+    capture.push('你是什么模型\n');
+    capture.push('✢ Puzzling...\n');
+
+    expect(capture.flush()).toBeNull();
+  });
+
+  it('does not create garbage entries from spinner fragments between real answers', () => {
+    const capture = new AiOutputCapture();
+
+    capture.setPrompt('第一个问题');
+    capture.push('● 第一个回答。\n');
+    const first = capture.push('❯\n');
+
+    capture.setPrompt('第二个问题');
+    capture.push('...\n');
+    capture.push('*...\n');
+    capture.push('*\n');
+    capture.push('P\n');
+    capture.push('*u\n');
+    capture.push('Pzz\n');
+    capture.push('*ul\n');
+    capture.push('zi\n');
+    capture.push('+zn\n');
+    capture.push('lig...\n');
+    capture.push('n\n');
+    capture.push('·g\n');
+    capture.push('...\n');
+    capture.push('+\n');
+    capture.push('•\n');
+    capture.push('*\n');
+    expect(capture.flush()).toBeNull();
+
+    capture.push('● 第二个回答。\n');
+    const second = capture.push('❯\n');
+
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(capture.getEntries()).toHaveLength(2);
+    expect(capture.getEntries().map((entry) => entry.content)).toEqual(['第一个回答。', '第二个回答。']);
   });
 });

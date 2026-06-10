@@ -76,19 +76,19 @@ function normalizeMatrixRowBreaks(source) {
 }
 function normalizeMathDelimiters(source) {
   const unescaped = source.replace(/\\\\\[/g, "\\[").replace(/\\\\\]/g, "\\]").replace(/\\\\\(/g, "\\(").replace(/\\\\\)/g, "\\)");
-  return closeUnterminatedMatrixMath(unescaped).replace(/(^|[\s:：。])([A-Za-z][A-Za-z0-9_]*\([^\n$]*?\)\s*\\(?:rightarrow|to)\s*\([^\n$]*?\))\$/g, "$1$$$2$").replace(/\$\s*\$/g, () => "$$");
+  return closeUnterminatedMatrixMath(unescaped).replace(/(^|[\s:：。])([A-Za-z][A-Za-z0-9_]*\([^\n$]*?\)\s*\\(?:rightarrow|to)\s*\([^\n$]*?\))\$/g, "$1$$$2$");
 }
 function closeUnterminatedMatrixMath(source) {
   return source.replace(
-    new RegExp(`\\$([^$]*?\\\\begin\\{(?:${MATRIX_ENVS})\\}[^$]*?\\\\end\\{(?:${MATRIX_ENVS})\\})(?=[，。；;：:]|$)`, "g"),
+    new RegExp(`\\$([^$]*?\\\\begin\\{(?:${MATRIX_ENVS})\\}[^$]*?\\\\end\\{(?:${MATRIX_ENVS})\\})(?=[，。；;：:]|$)(?!\\$)`, "g"),
     "$$$1$"
   );
 }
 function normalizeAiMarkdown(source) {
   let text2 = normalizeMathDelimiters(source);
+  text2 = normalizeDoubleDollarMath(text2);
   text2 = normalizeStandaloneDollarMath(text2);
   text2 = normalizeStandaloneBracketMath(text2);
-  text2 = normalizeStandaloneFormulaLines(text2);
   text2 = wrapBareLaTeXCommands(text2);
   text2 = joinWrappedInlineMath(text2);
   text2 = normalizeInlineBracketMath(text2);
@@ -98,15 +98,22 @@ function normalizeAiMarkdown(source) {
   text2 = normalizeFormulaSpacing(text2);
   return text2.trim();
 }
+function normalizeDoubleDollarMath(source) {
+  return source.replace(/(^|\n)[ \t]*\$\$[ \t]*\n?([\s\S]*?)\n?[ \t]*\$\$[ \t]*(?=\n|$)/g, (_match, prefix, math2) => {
+    return `${prefix}$$
+${math2.trim()}
+$$`;
+  });
+}
 function normalizeStandaloneDollarMath(source) {
-  return source.replace(/(^|\n)\s*\$\s*\n([\s\S]*?)\n\s*\$\s*(?=\n|$)/g, (_match, prefix, math2) => {
+  return source.replace(/(^|\n)[ \t]*\$[ \t]*\n([\s\S]*?)\n[ \t]*\$[ \t]*(?=\n|$)/g, (_match, prefix, math2) => {
     return `${prefix}$$
 ${math2.trim()}
 $$`;
   });
 }
 function normalizeStandaloneBracketMath(source) {
-  return source.replace(/(^|\n)\s*\[\s*\n([\s\S]*?)\n\s*\]\s*(?=\n|$)/g, (_match, prefix, math2) => {
+  return source.replace(/(^|\n)[ \t]*\[[ \t]*\n([\s\S]*?)\n[ \t]*\][ \t]*(?=\n|$)/g, (_match, prefix, math2) => {
     return `${prefix}
 $$
 ${math2.trim()}
@@ -114,30 +121,9 @@ $$
 `;
   });
 }
-function normalizeStandaloneFormulaLines(source) {
-  return source.split("\n").map((line) => {
-    const trimmed = line.trim();
-    if (!isStandaloneFormulaLine(trimmed)) {
-      return line;
-    }
-    return `$$
-${trimmed.slice(1, -1).trim()}
-$$`;
-  }).join("\n");
-}
-function isStandaloneFormulaLine(line) {
-  if (!/^\$(?!\$)[\s\S]+\$(?!\$)$/.test(line)) {
-    return false;
-  }
-  const inner2 = line.slice(1, -1).trim();
-  if (!inner2 || inner2.includes("\n")) {
-    return false;
-  }
-  return inner2.length > 48 || /\\begin\{/.test(inner2) || /\\(?:frac|left|right|exp|sum|prod|int|mathbb|boldsymbol|mathbf|mathcal)\b/.test(inner2);
-}
 function joinWrappedInlineMath(source) {
   return source.replace(/(^|[^$\n])\$([^$]*?\n[^$]*?)\$(?!\$)/g, (match2, prefix, inner2) => {
-    if (inner2.includes("$") || /\n\s*\n/.test(inner2)) {
+    if (inner2.includes("$") || /\n\s*\n/.test(inner2) || /\n\s*[-*+]\s+/.test(inner2)) {
       return match2;
     }
     const joined = inner2.replace(/\s*\n\s*/g, " ").trim();
@@ -147,7 +133,7 @@ function joinWrappedInlineMath(source) {
 function wrapBareLaTeXCommands(source) {
   let insideDisplayMath = false;
   return source.split("\n").map((line) => {
-    if (/^\s*\$\$\s*$/.test(line)) {
+    if (/^\s*\${1,2}\s*$/.test(line)) {
       insideDisplayMath = !insideDisplayMath;
       return line;
     }
@@ -165,20 +151,20 @@ function normalizeInlineBracketMath(source) {
   });
 }
 function normalizeChineseLists(source) {
-  return source.replace(/(^|\n)\s*\$\$\s*\n([\s\S]*?)\n\s*\$\$\s*(?=\n|$)/g, (_match, prefix, math2) => `${prefix}
+  return source.replace(/(^|\n)[ \t]*\$\$[ \t]*\n([\s\S]*?)\n[ \t]*\$\$[ \t]*(?=\n|$)/g, (_match, prefix, math2) => `${prefix}
 §§DISPLAY§§
 ${math2.trim()}
 §§DISPLAY§§
-`).replace(/([：:])\s*-\s+/g, "$1\n\n- ").replace(/([^\n])\s+-\s+(?=(?:\$|\\\(|[A-Za-z0-9_一-鿿]))/g, "$1\n- ");
+`).replace(/([：:])\s*-\s+/g, "$1\n\n- ").replace(/([^\n])\n([ \t]*[-*+]\s+)/g, "$1\n\n$2").replace(/([^\n])\s+-\s+(?=(?:\$|\\\(|[A-Za-z0-9_一-鿿]))/g, "$1\n- ");
 }
 function normalizeNumberedSections(source) {
   return source.replace(/(?:^|\n)\s*---\s*(\d+\.\s+[^\n。:：]+)\s+/g, "\n\n## $1\n\n").replace(/(?:^|\n)\s*(\d+\.\s+[^\n。:：]{2,36})\n(?=[一-鿿A-Za-z])/g, "\n\n## $1\n\n");
 }
 function normalizeParagraphs(source) {
-  return source.replace(/。(?=\S)/g, "。\n\n").replace(/([。！？])\s+(?=[一-鿿])/g, "$1\n\n").replace(/([：:。！？])\n(?!\n)(?=[^\s\-*#$\\])/g, "$1\n\n").replace(/([^\n$])\n(\$(?!\$))/g, "$1\n\n$2").replace(/(\$)\n(?!\n)(?=[一-鿿])/g, "$1\n\n");
+  return source.replace(/。(?=\S)/g, "。\n\n").replace(/([。！？])\s+(?=[一-鿿])/g, "$1\n\n").replace(/([：:。！？])\n(?!\n)(?=[^\s#$\\])/g, "$1\n\n").replace(/([^\n$])\n(\$(?!\$))/g, "$1\n\n$2").replace(/(\$)\n(?!\n)(?=[一-鿿])/g, "$1\n\n");
 }
 function normalizeFormulaSpacing(source) {
-  return source.replace(/([^\n])\n?\$\$\n/g, "$1\n\n$$\n").replace(/\n\$\$\n([^\n])/g, "\n$$\n$1").replace(/\n\$\$([^\n])/g, "\n$$\n$1").replace(/([^\n])\$\$/g, "$1\n$$").replace(/\$\$\n([^\n]*?)\n\$\$/g, "$$\n$1\n$$").replace(/\$\$(?=\n[^\n])/g, "$$\n").replace(/\$\$\n/g, "$$\n").replace(/§§DISPLAY§§/g, "$$$$").replace(/\n{3,}/g, "\n\n");
+  return source.replace(/([^\n])\n\$\$\n/g, "$1\n\n$$\n").replace(/\n\$\$\n([^\n])/g, "\n$$\n$1").replace(/§§DISPLAY§§/g, "$$$$").replace(/\n{3,}/g, "\n\n");
 }
 function looksLikeMath(value) {
   const text2 = value.trim();
@@ -259,6 +245,9 @@ class AiOutputCapture {
       }
       return null;
     }
+    if (this.state === "idle" && this.pendingPrompt && isEchoedPromptFragment(trimmed, this.pendingPrompt)) {
+      return null;
+    }
     if (this.state === "capturing") {
       if (this.wouldExceedCaptureLimit(cleaned)) {
         return this.finishCurrent();
@@ -291,16 +280,23 @@ class AiOutputCapture {
   wouldExceedCaptureLimit(nextLine) {
     return this.currentLines.length >= MAX_CAPTURE_LINES || this.currentChars + nextLine.length + 1 > MAX_CAPTURE_CHARS;
   }
+  prepareAnswerContent() {
+    const cleanedLines = trimBlankLines(this.currentLines).filter((line) => {
+      const trimmedLine = line.trim();
+      return trimmedLine && !isTerminalUiLine(trimmedLine) && !isUserInputLine(trimmedLine) && !(this.pendingPrompt && isEchoedPromptFragment(trimmedLine, this.pendingPrompt));
+    });
+    return trimBlankLines(cleanedLines).join("\n").trim();
+  }
   finishCurrent() {
-    const content = trimBlankLines(this.currentLines).join("\n").trim();
+    const content = this.prepareAnswerContent();
     this.state = "idle";
     this.currentLines = [];
     this.currentChars = 0;
-    if (!content) {
+    if (!content || !isMeaningfulAnswerContent(content)) {
       return null;
     }
     const normalizedContent = normalizeAiMarkdown(content);
-    if (!normalizedContent) {
+    if (!normalizedContent || !isMeaningfulAnswerContent(normalizedContent)) {
       return null;
     }
     this.counter += 1;
@@ -375,25 +371,30 @@ function isTerminalUiLine(trimmed) {
     /^bug\b/i,
     /^release-notes\b/i,
     /^[/\\]?release-notes/i,
+    /^(?:Puzzling|Calculating|Ebbing)(?:\.\.\.|…)?(?:\s*\([^)]*\))?$/i,
     /^gpt-[\w.-]+\s+with\s+/i,
     /^model\s+(changed|switched)/i,
     /^switched\s+(to|model)/i,
     /^\/model\b/i,
     /^API Usage/i,
     /^Billing/i,
+    /^\[[\w.-]+\]\s*\|/,
+    /\bContext\b.*\d+%/i,
+    /^\d+\s+CLAUDE\.md\s*\|\s*\d+\s+MCPs$/i,
+    /^←\s*for agents\S*$/i,
     /Resume\s*session/i,
     /^\(\s*\d+\s*of\s*\d+\s*\)/i,
     /Search(?:\.\.\.|…)/i,
     /\bHEAD[·:\s-]*\d+(?:\.\d+)?\s*KB/i,
     /(?:^|\s)\d+\s*(?:minutes?|hours?|days?)\s*ago[·\s-]*HEAD/i,
     /(?:Space to preview|Space\s*preview|Spacpreview|Ctrl\+B to only show current batch|Ctrl\+R to rename|Type to search|Esc to cancel)/i,
-    /^[\s\-─━═╭╮╰╯│┃┌┐└┘├┤┬┴┼╎╏]+$/,
-    /^[*✻✽✶✳✢·•]\s*(Baked|Wonked|Thought|Used|Interrupted|Galloping|Worked)\b/i,
+    /^[\s\-─━═╭╮╰╯│┃┌┐└┘├┤┬┴┼╎╏>›❯]+$/,
+    /^[*✻✽✶✳✢·•]\s*(Baked|Wonked|Thought|Used|Interrupted|Galloping|Worked|Ebbing)\b/i,
     /^Thought for/i,
     /^Baked for/i,
     /^Wonked for/i,
     /^Worked for/i,
-    /^Galloping/i,
+    /^Ebbing/i,
     /^⎿\s*Tip:/i,
     /^\?\s+for shortcuts/i,
     /^[-─━═]{5,}$/
@@ -402,11 +403,54 @@ function isTerminalUiLine(trimmed) {
 function isUserInputLine(trimmed) {
   return /^输出一个/.test(trimmed) || /^使用\$?$/.test(trimmed) || /^模型$/.test(trimmed) || /^claude\b/i.test(trimmed);
 }
+function isEchoedPromptFragment(trimmed, prompt) {
+  const normalizedLine = normalizePromptComparable(trimmed);
+  const normalizedPrompt = normalizePromptComparable(prompt);
+  if (!normalizedLine || !normalizedPrompt) {
+    return false;
+  }
+  return normalizedPrompt.includes(normalizedLine) || normalizedLine.includes(normalizedPrompt);
+}
+function normalizePromptComparable(value) {
+  return cleanPromptTitle(value).replace(/[\s`*_~|:：。！？,.，、;；\-—–\[\]()（）{}<>《》]/g, "").toLowerCase();
+}
 function isPromptLine(trimmed) {
   return /^[>›❯]\s*$/.test(trimmed) || /^\?\s+for shortcuts/i.test(trimmed);
 }
 function looksLikeAiAnswerLine(trimmed) {
-  return /[一-鿿]/.test(trimmed) || /\$[^$]+\$/.test(trimmed) || /\\\[[\s\S]*?\\\]/.test(trimmed) || /\$\$/.test(trimmed) || /^#{1,6}\s+/.test(trimmed) || /^[-*+]\s+/.test(trimmed) || /^\d+\.\s+/.test(trimmed) || /^```/.test(trimmed);
+  if (isTerminalUiLine(trimmed) || isUserInputLine(trimmed) || isLikelyGarbageFragment(trimmed)) {
+    return false;
+  }
+  return /[一-鿿]/.test(trimmed) || /\$[^$]+\$/.test(trimmed) || /\\\[[\s\S]*?\\\]/.test(trimmed) || /\$\$/.test(trimmed) || /^#{1,6}\s+/.test(trimmed) || /^[-*+]\s+\S/.test(trimmed) || /^\d+\.\s+/.test(trimmed) || /^```/.test(trimmed);
+}
+function isMeaningfulAnswerContent(content) {
+  const lines = content.split("\n").map((line) => line.trim()).filter(Boolean).filter((line) => !isTerminalUiLine(line) && !isUserInputLine(line) && !isLikelyGarbageFragment(line));
+  if (lines.length === 0) {
+    return false;
+  }
+  if (lines.some((line) => /(?:\$[^$]+\$|\$\$|\\\[[\s\S]*?\\\])/.test(line) && /[A-Za-z0-9\\]/.test(line))) {
+    return true;
+  }
+  const plain = lines.join(" ").replace(/\$[^$]*\$/g, "").replace(/[\s`*_~|:：。！？,.，、;；\-—–\[\]()（）{}<>《》·•✻✽✶✳✢+\\/]/g, "");
+  return /[一-鿿A-Za-z0-9]/.test(plain);
+}
+function isLikelyGarbageFragment(trimmed) {
+  if (!trimmed) {
+    return true;
+  }
+  if (/^(?:\.\.\.|…+)$/.test(trimmed)) {
+    return true;
+  }
+  if (/^[*✻✽✶✳✢·•+]$/.test(trimmed)) {
+    return true;
+  }
+  if (/^[*✻✽✶✳✢·•+]\S{0,3}$/.test(trimmed)) {
+    return true;
+  }
+  if (/^[A-Za-z]{1,4}(?:\.\.\.)?$/.test(trimmed) && !/^(AI|OK)$/i.test(trimmed)) {
+    return true;
+  }
+  return false;
 }
 function createTitle(content, index) {
   const withoutMathBlocks = content.replace(/\$\$[\s\S]*?\$\$/g, "[公式]");
@@ -21254,24 +21298,103 @@ ${DISPLAY_MATH_PLACEHOLDER}${index}X
     return `${INLINE_MATH_PLACEHOLDER}${index}X`;
   }
   const normalized = prepareLocalImages(source, resolvedImages);
-  const normalizedMath = normalizeWrappedInlineMath(
-    normalizeMathDelimiters(normalized).replace(/(?:^|\n)\s*\$\s*\n([\s\S]*?)\n\s*\$\s*(?=\n|$)/g, (_m, s15) => placeDisplay(s15))
+  const delimiterNormalized = normalizeMathDelimiters(normalized);
+  const normalizedMath = replaceStandaloneDollarBlocks(delimiterNormalized, placeDisplay);
+  const preparedMath = replaceSingleDollarMathSpans(
+    replaceSingleDollarLineMath(
+      normalizedMath.replace(/\$\$\n?\n?([\s\S]*?)\n?\n?\$\$/g, (_m, s15) => placeDisplay(s15)).replace(/\$\$([^$]+?)\$\$/g, (_m, s15) => placeDisplay(s15)).replace(/\\\[([\s\S]*?)\\\]/g, (_m, s15) => placeDisplay(s15)),
+      placeInline
+    ),
+    placeInline
   );
-  const prepared = normalizedMath.replace(/\$\$\n?\n?([\s\S]*?)\n?\n?\$\$/g, (_m, s15) => placeDisplay(s15)).replace(/\$\$([^$]+?)\$\$/g, (_m, s15) => placeDisplay(s15)).replace(/\\\[([\s\S]*?)\\\]/g, (_m, s15) => placeDisplay(s15)).replace(new RegExp(`\\$([^$]*?\\\\begin\\{(?:${MATRIX_ENVS})\\}[\\s\\S]*?\\\\end\\{(?:${MATRIX_ENVS})\\}(?:(?!${DISPLAY_MATH_PLACEHOLDER}|${INLINE_MATH_PLACEHOLDER})[^$])*)\\$`, "g"), (_m, s15) => placeInline(s15)).replace(/\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|bmatrix|pmatrix|matrix|vmatrix|Vmatrix|Bmatrix|array)\}([\s\S]*?)\\end\{\1\}/g, (_m, _e3, s15) => placeDisplay(s15)).replace(/\\\((.+?)\\\)/gs, (_m, s15) => placeInline(s15)).replace(/(?<!\$)\$([^$\n]+?)\$(?!\$)/g, (_m, s15) => placeInline(s15)).replace(/(?:^|(?<=\s|[^\w\\]))(?:\\times\b|\x09imes\b)/g, (m) => placeInline(m.trim() === "	imes" || m.includes("imes") ? "\\times" : m)).replace(/(?:\\ldots\b)/g, (m) => placeInline(m));
+  const prepared = replaceBareMathEnvironments(preparedMath, placeDisplay).replace(/\\\((.+?)\\\)/gs, (_m, s15) => placeInline(s15)).replace(/(?:^|(?<=\s|[^\w\\]))(?:\\times\b|\x09imes\b)/g, (m) => placeInline(m.trim() === "	imes" || m.includes("imes") ? "\\times" : m)).replace(/(?:\\ldots\b)/g, (m) => placeInline(m));
   let html2 = markdown.render(prepared);
   renderedMath.forEach((mathHtml, index) => {
     html2 = html2.replaceAll(`${DISPLAY_MATH_PLACEHOLDER}${index}X`, mathHtml).replaceAll(`${INLINE_MATH_PLACEHOLDER}${index}X`, mathHtml);
   });
   return DOMPurify ? DOMPurify.sanitize(html2, { ADD_TAGS: ["math", "svg"], ADD_ATTR: ["xmlns", "viewBox", "src", "alt", "title"] }) : html2;
 }
-function normalizeWrappedInlineMath(source) {
-  return source.replace(/(^|[^$\n])\$([^$]*?\n[^$]*?)\$(?!\$)/g, (match2, prefix, inner2) => {
-    if (inner2.includes("$") || /\n\s*\n/.test(inner2)) {
-      return match2;
+function replaceSingleDollarLineMath(source, placeInline) {
+  return source.split("\n").map((line) => {
+    const match2 = line.match(/^([ \t]*)\$(?!\$)([^$\n]+)\$(?!\$)([ \t]*)$/);
+    if (!match2) {
+      return line;
     }
-    const joined = inner2.replace(/\\([A-Za-z]{1,12})\s*\n\s*([A-Za-z]{2,12})(?=\b|\{)/g, (_m, left, right) => `\\${left}${right}`).replace(/\s*\n\s*/g, " ").trim();
-    return `${prefix}$${joined}$`;
-  });
+    return `${match2[1]}${placeInline(match2[2] ?? "")}${match2[3]}`;
+  }).join("\n");
+}
+function replaceStandaloneDollarBlocks(source, placeDisplay) {
+  const lines = source.split("\n");
+  const output = [];
+  let blockLines = null;
+  for (const line of lines) {
+    if (/^[ \t]*\$[ \t]*$/.test(line)) {
+      if (blockLines === null) {
+        blockLines = [];
+      } else {
+        output.push(placeDisplay(blockLines.join("\n")));
+        blockLines = null;
+      }
+      continue;
+    }
+    if (blockLines !== null) {
+      blockLines.push(line);
+      continue;
+    }
+    output.push(line);
+  }
+  if (blockLines !== null) {
+    output.push("$", ...blockLines);
+  }
+  return output.join("\n");
+}
+function replaceBareMathEnvironments(source, placeDisplay) {
+  return source.replace(
+    /\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|bmatrix|pmatrix|matrix|vmatrix|Vmatrix|Bmatrix|array)\}([\s\S]*?)\\end\{\1\}/g,
+    (match2, _environment, _body, offset) => {
+      const before = source.slice(0, offset);
+      const singleDollarCount = (before.match(/(?<!\$)\$(?!\$)/g) ?? []).length;
+      if (singleDollarCount % 2 === 1) {
+        return match2;
+      }
+      return placeDisplay(match2);
+    }
+  );
+}
+function replaceSingleDollarMathSpans(source, placeInline) {
+  let result = "";
+  let cursor = 0;
+  while (cursor < source.length) {
+    const start = source.indexOf("$", cursor);
+    if (start === -1) {
+      result += source.slice(cursor);
+      break;
+    }
+    if (source[start - 1] === "$" || source[start + 1] === "$") {
+      result += source.slice(cursor, start + 1);
+      cursor = start + 1;
+      continue;
+    }
+    const end = source.indexOf("$", start + 1);
+    if (end === -1) {
+      result += source.slice(cursor);
+      break;
+    }
+    if (source[end - 1] === "$" || source[end + 1] === "$") {
+      result += source.slice(cursor, end + 1);
+      cursor = end + 1;
+      continue;
+    }
+    const mathSource = source.slice(start + 1, end);
+    if (!mathSource.trim() || /\n\s*\n/.test(mathSource) || mathSource.includes(DISPLAY_MATH_PLACEHOLDER) || mathSource.includes(INLINE_MATH_PLACEHOLDER)) {
+      result += source.slice(cursor, start + 1);
+      cursor = start + 1;
+      continue;
+    }
+    result += source.slice(cursor, start) + placeInline(mathSource);
+    cursor = end + 1;
+  }
+  return result;
 }
 function collectLocalImageSources(source) {
   const sources = /* @__PURE__ */ new Set();

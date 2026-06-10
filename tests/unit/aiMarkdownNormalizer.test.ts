@@ -11,7 +11,7 @@ describe('normalizeAiMarkdown', () => {
   it('normalizes Chinese colon list syntax', () => {
     const normalized = normalizeAiMarkdown('其中：- $x$ 是空间位置 - $d$ 是观察方向');
 
-    expect(normalized).toContain('其中：\n- $x$ 是空间位置');
+    expect(normalized).toContain('其中：\n\n- $x$ 是空间位置');
     expect(normalized).toContain('\n- $d$ 是观察方向');
   });
 
@@ -38,7 +38,7 @@ $
     expect(normalized).toContain('$$\ne^{ix}=\\cos x+i\\sin x\n$$');
   });
 
-  it('preserves multiline double-dollar math fences', () => {
+  it('preserves multiline double-dollar math fences as display blocks', () => {
     const normalized = normalizeAiMarkdown(`公式如下：
 $$
 A=\\begin{pmatrix}
@@ -50,7 +50,6 @@ $$
 
     expect(normalized).toContain('$$\nA=\\begin{pmatrix}');
     expect(normalized).toContain('\\end{pmatrix}\n$$');
-    expect(normalized).not.toContain('\n$\nA=');
   });
 
   it('joins inline math wrapped across terminal lines', () => {
@@ -67,22 +66,34 @@ $$
     expect(normalized).toContain('$y$');
   });
 
-  it('keeps display math blocks intact when wrapping bare LaTeX commands', () => {
+  it('preserves long single-dollar formulas as inline math', () => {
     const normalized = normalizeAiMarkdown(String.raw`如果写完整的归一化高斯形式，则是：
 $G(\mathbf{x})=\frac{1}{(2\pi)^{3/2}|\boldsymbol{\Sigma}|^{1/2}}\exp\left(-\frac{1}{2}(\mathbf{x}-\boldsymbol{\mu})^T\boldsymbol{\Sigma}^{-1}(\mathbf{x}-\boldsymbol{\mu})\right)$
 不过在 3DGS 渲染中，通常更关注指数部分。`);
 
-    expect(normalized).toContain('$$\nG(\\mathbf{x})=');
-    expect(normalized).toContain('\\right)\n$$');
-    expect(normalized).not.toContain('$\\boldsymbol{\\Sigma}$');
+    expect(normalized).toContain('$G(\\mathbf{x})=');
+    expect(normalized).toContain('\\right)$');
+    expect(normalized).not.toContain('$$\nG(\\mathbf{x})=');
   });
 
-  it('uses display math for standalone long inline formulas', () => {
+  it('keeps standalone long single-dollar formula lines inline', () => {
     const normalized = normalizeAiMarkdown(String.raw`公式：
 $G(\mathbf{x})=\exp\left(-\frac{1}{2}(\mathbf{x}-\boldsymbol{\mu})^T\boldsymbol{\Sigma}^{-1}(\mathbf{x}-\boldsymbol{\mu})\right)$
 其中：`);
 
-    expect(normalized).toContain('$$\nG(\\mathbf{x})=');
-    expect(normalized).not.toContain('$G(\\mathbf{x})=');
+    expect(normalized).toContain('$G(\\mathbf{x})=');
+    expect(normalized).not.toContain('$$\nG(\\mathbf{x})=');
+  });
+
+  it('adds a blank line before unordered lists after Chinese text', () => {
+    const normalized = normalizeAiMarkdown(`尤其是数学公式我会注意：
+- 行内公式用 $...$
+- 独立公式也用 $...$, 但单独成行
+- 不混用奇怪符号`);
+
+    expect(normalized).toContain('尤其是数学公式我会注意：\n\n- 行内公式用 $...$');
+    expect(normalized).toContain('\n- 独立公式也用 $...$, 但单独成行');
+    expect(normalized).toContain('\n- 不混用奇怪符号');
+    expect(normalized).not.toContain('$...$-');
   });
 });

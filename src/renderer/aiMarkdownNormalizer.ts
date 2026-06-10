@@ -3,9 +3,9 @@ import { normalizeMathDelimiters } from './mathNormalizer';
 export function normalizeAiMarkdown(source: string): string {
   let text = normalizeMathDelimiters(source);
 
+  text = normalizeDoubleDollarMath(text);
   text = normalizeStandaloneDollarMath(text);
   text = normalizeStandaloneBracketMath(text);
-  text = normalizeStandaloneFormulaLines(text);
   text = wrapBareLaTeXCommands(text);
   text = joinWrappedInlineMath(text);
   text = normalizeInlineBracketMath(text);
@@ -17,42 +17,22 @@ export function normalizeAiMarkdown(source: string): string {
   return text.trim();
 }
 
+function normalizeDoubleDollarMath(source: string): string {
+  return source.replace(/(^|\n)[ \t]*\$\$[ \t]*\n?([\s\S]*?)\n?[ \t]*\$\$[ \t]*(?=\n|$)/g, (_match, prefix: string, math: string) => {
+    return `${prefix}$$\n${math.trim()}\n$$`;
+  });
+}
+
 function normalizeStandaloneDollarMath(source: string): string {
-  return source.replace(/(^|\n)\s*\$\s*\n([\s\S]*?)\n\s*\$\s*(?=\n|$)/g, (_match, prefix: string, math: string) => {
-    return `${prefix}$\n${math.trim()}\n$`;
+  return source.replace(/(^|\n)[ \t]*\$[ \t]*\n([\s\S]*?)\n[ \t]*\$[ \t]*(?=\n|$)/g, (_match, prefix: string, math: string) => {
+    return `${prefix}$$\n${math.trim()}\n$$`;
   });
 }
 
 function normalizeStandaloneBracketMath(source: string): string {
-  return source.replace(/(^|\n)\s*\[\s*\n([\s\S]*?)\n\s*\]\s*(?=\n|$)/g, (_match, prefix: string, math: string) => {
-    return `${prefix}\n$\n${math.trim()}\n$\n`;
+  return source.replace(/(^|\n)[ \t]*\[[ \t]*\n([\s\S]*?)\n[ \t]*\][ \t]*(?=\n|$)/g, (_match, prefix: string, math: string) => {
+    return `${prefix}\n$$\n${math.trim()}\n$$\n`;
   });
-}
-
-function normalizeStandaloneFormulaLines(source: string): string {
-  return source.split('\n').map((line) => {
-    const trimmed = line.trim();
-    if (!isStandaloneFormulaLine(trimmed)) {
-      return line;
-    }
-
-    return `$\n${trimmed.slice(1, -1).trim()}\n$`;
-  }).join('\n');
-}
-
-function isStandaloneFormulaLine(line: string): boolean {
-  if (!/^\$(?!\$)[\s\S]+\$(?!\$)$/.test(line)) {
-    return false;
-  }
-
-  const inner = line.slice(1, -1).trim();
-  if (!inner || inner.includes('\n')) {
-    return false;
-  }
-
-  return inner.length > 48
-    || /\\begin\{/.test(inner)
-    || /\\(?:frac|left|right|exp|sum|prod|int|mathbb|boldsymbol|mathbf|mathcal)\b/.test(inner);
 }
 
 // A long inline $...$ formula can be wrapped by the terminal onto two physical
@@ -62,7 +42,7 @@ function isStandaloneFormulaLine(line: string): boolean {
 // blocks are left untouched.
 function joinWrappedInlineMath(source: string): string {
   return source.replace(/(^|[^$\n])\$([^$]*?\n[^$]*?)\$(?!\$)/g, (match, prefix: string, inner: string) => {
-    if (inner.includes('$') || /\n\s*\n/.test(inner)) {
+    if (inner.includes('$') || /\n\s*\n/.test(inner) || /\n\s*[-*+]\s+/.test(inner)) {
       return match;
     }
     const joined = inner.replace(/\s*\n\s*/g, ' ').trim();
@@ -77,7 +57,7 @@ function wrapBareLaTeXCommands(source: string): string {
   let insideDisplayMath = false;
 
   return source.split('\n').map((line) => {
-    if (/^\s*\$\$\s*$/.test(line)) {
+    if (/^\s*\${1,2}\s*$/.test(line)) {
       insideDisplayMath = !insideDisplayMath;
       return line;
     }
@@ -102,8 +82,9 @@ function normalizeInlineBracketMath(source: string): string {
 
 function normalizeChineseLists(source: string): string {
   return source
-    .replace(/(^|\n)\s*\$\$\s*\n([\s\S]*?)\n\s*\$\$\s*(?=\n|$)/g, (_match, prefix: string, math: string) => `${prefix}\n§§DISPLAY§§\n${math.trim()}\n§§DISPLAY§§\n`)
+    .replace(/(^|\n)[ \t]*\$\$[ \t]*\n([\s\S]*?)\n[ \t]*\$\$[ \t]*(?=\n|$)/g, (_match, prefix: string, math: string) => `${prefix}\n§§DISPLAY§§\n${math.trim()}\n§§DISPLAY§§\n`)
     .replace(/([：:])\s*-\s+/g, '$1\n\n- ')
+    .replace(/([^\n])\n([ \t]*[-*+]\s+)/g, '$1\n\n$2')
     .replace(/([^\n])\s+-\s+(?=(?:\$|\\\(|[A-Za-z0-9_一-鿿]))/g, '$1\n- ');
 }
 
@@ -118,7 +99,7 @@ function normalizeParagraphs(source: string): string {
     .replace(/。(?=\S)/g, '。\n\n')
     .replace(/([。！？])\s+(?=[一-鿿])/g, '$1\n\n')
     // Chinese colon at end of line followed immediately by content → insert blank line
-    .replace(/([：:。！？])\n(?!\n)(?=[^\s\-*#$\\])/g, '$1\n\n')
+    .replace(/([：:。！？])\n(?!\n)(?=[^\s#$\\])/g, '$1\n\n')
     // Non-empty line followed by a line starting with $ (math block) → blank line between
     .replace(/([^\n$])\n(\$(?!\$))/g, '$1\n\n$2')
     // Line ending with $ (closing inline math) followed by Chinese text → blank line
@@ -127,13 +108,8 @@ function normalizeParagraphs(source: string): string {
 
 function normalizeFormulaSpacing(source: string): string {
   return source
-    .replace(/([^\n])\n?\$\$\n/g, '$1\n\n$$\n')
+    .replace(/([^\n])\n\$\$\n/g, '$1\n\n$$\n')
     .replace(/\n\$\$\n([^\n])/g, '\n$$\n$1')
-    .replace(/\n\$\$([^\n])/g, '\n$$\n$1')
-    .replace(/([^\n])\$\$/g, '$1\n$$')
-    .replace(/\$\$\n([^\n]*?)\n\$\$/g, '$$\n$1\n$$')
-    .replace(/\$\$(?=\n[^\n])/g, '$$\n')
-    .replace(/\$\$\n/g, '$$\n')
     .replace(/§§DISPLAY§§/g, '$$$$')
     .replace(/\n{3,}/g, '\n\n');
 }

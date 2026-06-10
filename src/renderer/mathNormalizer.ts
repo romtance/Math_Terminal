@@ -112,13 +112,12 @@ export function normalizeMathDelimiters(source: string): string {
     .replace(/\\\\\)/g, '\\)');
 
   return closeUnterminatedMatrixMath(unescaped)
-    .replace(/(^|[\s:：。])([A-Za-z][A-Za-z0-9_]*\([^\n$]*?\)\s*\\(?:rightarrow|to)\s*\([^\n$]*?\))\$/g, '$1$$$2$')
-    .replace(/\$\s*\$/g, () => '$$');
+    .replace(/(^|[\s:：。])([A-Za-z][A-Za-z0-9_]*\([^\n$]*?\)\s*\\(?:rightarrow|to)\s*\([^\n$]*?\))\$/g, '$1$$$2$');
 }
 
 function closeUnterminatedMatrixMath(source: string): string {
   return source.replace(
-    new RegExp(`\\$([^$]*?\\\\begin\\{(?:${MATRIX_ENVS})\\}[^$]*?\\\\end\\{(?:${MATRIX_ENVS})\\})(?=[，。；;：:]|$)`, 'g'),
+    new RegExp(`\\$([^$]*?\\\\begin\\{(?:${MATRIX_ENVS})\\}[^$]*?\\\\end\\{(?:${MATRIX_ENVS})\\})(?=[，。；;：:]|$)(?!\\$)`, 'g'),
     '$$$1$'
   );
 }

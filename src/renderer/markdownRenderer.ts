@@ -3,7 +3,7 @@ import createDOMPurify from 'dompurify';
 import katex from 'katex';
 
 const DOMPurify = typeof window !== 'undefined' ? createDOMPurify(window) : null;
-import { MATRIX_ENVS, normalizeMathDelimiters, normalizeMathSource } from './mathNormalizer';
+import { normalizeMathDelimiters, normalizeMathSource } from './mathNormalizer';
 
 const DISPLAY_MATH_PLACEHOLDER = 'DISPLAY_MATH_';
 const INLINE_MATH_PLACEHOLDER = 'INLINE_MATH_';
@@ -54,26 +54,26 @@ function renderPreparedMarkdown(source: string, resolvedImages: Map<string, stri
 
   // Normalize standalone $ ... $ blocks (dollar alone on its own line)
   const normalized = prepareLocalImages(source, resolvedImages);
-  const normalizedMath = normalizeWrappedInlineMath(
-    normalizeMathDelimiters(normalized)
-      .replace(/(?:^|\n)\s*\$\s*\n([\s\S]*?)\n\s*\$\s*(?=\n|$)/g, (_m, s) => placeDisplay(s))
+  const delimiterNormalized = normalizeMathDelimiters(normalized);
+  const normalizedMath = replaceStandaloneDollarBlocks(delimiterNormalized, placeDisplay);
+
+  const preparedMath = replaceSingleDollarMathSpans(
+    replaceSingleDollarLineMath(
+      normalizedMath
+        // $$\n...\n$$ (allow optional blank lines after opening $$)
+        .replace(/\$\$\n?\n?([\s\S]*?)\n?\n?\$\$/g, (_m, s) => placeDisplay(s))
+        // $$...$$
+        .replace(/\$\$([^$]+?)\$\$/g, (_m, s) => placeDisplay(s))
+        // \[...\]
+        .replace(/\\\[([\s\S]*?)\\\]/g, (_m, s) => placeDisplay(s)),
+      placeInline
+    ),
+    placeInline
   );
 
-  const prepared = normalizedMath
-    // $$\n...\n$$ (allow optional blank lines after opening $$)
-    .replace(/\$\$\n?\n?([\s\S]*?)\n?\n?\$\$/g, (_m, s) => placeDisplay(s))
-    // $$...$$
-    .replace(/\$\$([^$]+?)\$\$/g, (_m, s) => placeDisplay(s))
-    // \[...\]
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_m, s) => placeDisplay(s))
-    // $...\begin{matrix}...\end{matrix}...$ — must come BEFORE standalone \begin display
-    .replace(new RegExp(`\\$([^$]*?\\\\begin\\{(?:${MATRIX_ENVS})\\}[\\s\\S]*?\\\\end\\{(?:${MATRIX_ENVS})\\}(?:(?!${DISPLAY_MATH_PLACEHOLDER}|${INLINE_MATH_PLACEHOLDER})[^$])*)\\$`, 'g'), (_m, s) => placeInline(s))
-    // \begin{equation/align/matrix/...} standalone (not wrapped in $)
-    .replace(/\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|bmatrix|pmatrix|matrix|vmatrix|Vmatrix|Bmatrix|array)\}([\s\S]*?)\\end\{\1\}/g, (_m, _e, s) => placeDisplay(s))
+  const prepared = replaceBareMathEnvironments(preparedMath, placeDisplay)
     // \(...\)
     .replace(/\\\((.+?)\\\)/gs, (_m, s) => placeInline(s))
-    // $...$
-    .replace(/(?<!\$)\$([^$\n]+?)\$(?!\$)/g, (_m, s) => placeInline(s))
     // bare \times / \ldots outside any math delimiters (tab-damaged or unwrapped)
     .replace(/(?:^|(?<=\s|[^\w\\]))(?:\\times\b|\x09imes\b)/g, (m) => placeInline(m.trim() === '\times' || m.includes('imes') ? '\\times' : m))
     .replace(/(?:\\ldots\b)/g, (m) => placeInline(m));
@@ -91,18 +91,107 @@ function renderPreparedMarkdown(source: string, resolvedImages: Map<string, stri
     : html;
 }
 
-function normalizeWrappedInlineMath(source: string): string {
-  return source.replace(/(^|[^$\n])\$([^$]*?\n[^$]*?)\$(?!\$)/g, (match, prefix: string, inner: string) => {
-    if (inner.includes('$') || /\n\s*\n/.test(inner)) {
-      return match;
+function replaceSingleDollarLineMath(source: string, placeInline: (mathSource: string) => string): string {
+  return source.split('\n').map((line) => {
+    const match = line.match(/^([ \t]*)\$(?!\$)([^$\n]+)\$(?!\$)([ \t]*)$/);
+    if (!match) {
+      return line;
     }
 
-    const joined = inner
-      .replace(/\\([A-Za-z]{1,12})\s*\n\s*([A-Za-z]{2,12})(?=\b|\{)/g, (_m, left: string, right: string) => `\\${left}${right}`)
-      .replace(/\s*\n\s*/g, ' ')
-      .trim();
-    return `${prefix}$${joined}$`;
-  });
+    return `${match[1]}${placeInline(match[2] ?? '')}${match[3]}`;
+  }).join('\n');
+}
+
+function replaceStandaloneDollarBlocks(source: string, placeDisplay: (mathSource: string) => string): string {
+  const lines = source.split('\n');
+  const output: string[] = [];
+  let blockLines: string[] | null = null;
+
+  for (const line of lines) {
+    if (/^[ \t]*\$[ \t]*$/.test(line)) {
+      if (blockLines === null) {
+        blockLines = [];
+      } else {
+        output.push(placeDisplay(blockLines.join('\n')));
+        blockLines = null;
+      }
+      continue;
+    }
+
+    if (blockLines !== null) {
+      blockLines.push(line);
+      continue;
+    }
+
+    output.push(line);
+  }
+
+  if (blockLines !== null) {
+    output.push('$', ...blockLines);
+  }
+
+  return output.join('\n');
+}
+
+function replaceBareMathEnvironments(source: string, placeDisplay: (mathSource: string) => string): string {
+  return source.replace(
+    /\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|bmatrix|pmatrix|matrix|vmatrix|Vmatrix|Bmatrix|array)\}([\s\S]*?)\\end\{\1\}/g,
+    (match: string, _environment: string, _body: string, offset: number) => {
+      const before = source.slice(0, offset);
+      const singleDollarCount = (before.match(/(?<!\$)\$(?!\$)/g) ?? []).length;
+      if (singleDollarCount % 2 === 1) {
+        return match;
+      }
+
+      return placeDisplay(match);
+    }
+  );
+}
+
+function replaceSingleDollarMathSpans(source: string, placeInline: (mathSource: string) => string): string {
+  let result = '';
+  let cursor = 0;
+
+  while (cursor < source.length) {
+    const start = source.indexOf('$', cursor);
+    if (start === -1) {
+      result += source.slice(cursor);
+      break;
+    }
+
+    if (source[start - 1] === '$' || source[start + 1] === '$') {
+      result += source.slice(cursor, start + 1);
+      cursor = start + 1;
+      continue;
+    }
+
+    const end = source.indexOf('$', start + 1);
+    if (end === -1) {
+      result += source.slice(cursor);
+      break;
+    }
+
+    if (source[end - 1] === '$' || source[end + 1] === '$') {
+      result += source.slice(cursor, end + 1);
+      cursor = end + 1;
+      continue;
+    }
+
+    const mathSource = source.slice(start + 1, end);
+    if (!mathSource.trim()
+      || /\n\s*\n/.test(mathSource)
+      || mathSource.includes(DISPLAY_MATH_PLACEHOLDER)
+      || mathSource.includes(INLINE_MATH_PLACEHOLDER)) {
+      result += source.slice(cursor, start + 1);
+      cursor = start + 1;
+      continue;
+    }
+
+    result += source.slice(cursor, start) + placeInline(mathSource);
+    cursor = end + 1;
+  }
+
+  return result;
 }
 
 function collectLocalImageSources(source: string): string[] {

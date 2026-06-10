@@ -102,6 +102,10 @@ export class AiOutputCapture {
       return null;
     }
 
+    if (this.state === 'idle' && this.pendingPrompt && isEchoedPromptFragment(trimmed, this.pendingPrompt)) {
+      return null;
+    }
+
     if (this.state === 'capturing') {
       if (this.wouldExceedCaptureLimit(cleaned)) {
         return this.finishCurrent();
@@ -143,18 +147,31 @@ export class AiOutputCapture {
       || this.currentChars + nextLine.length + 1 > MAX_CAPTURE_CHARS;
   }
 
+  private prepareAnswerContent(): string {
+    const cleanedLines = trimBlankLines(this.currentLines)
+      .filter((line) => {
+        const trimmedLine = line.trim();
+        return trimmedLine
+          && !isTerminalUiLine(trimmedLine)
+          && !isUserInputLine(trimmedLine)
+          && !(this.pendingPrompt && isEchoedPromptFragment(trimmedLine, this.pendingPrompt));
+      });
+
+    return trimBlankLines(cleanedLines).join('\n').trim();
+  }
+
   private finishCurrent(): AiAnswerEntry | null {
-    const content = trimBlankLines(this.currentLines).join('\n').trim();
+    const content = this.prepareAnswerContent();
     this.state = 'idle';
     this.currentLines = [];
     this.currentChars = 0;
 
-    if (!content) {
+    if (!content || !isMeaningfulAnswerContent(content)) {
       return null;
     }
 
     const normalizedContent = normalizeAiMarkdown(content);
-    if (!normalizedContent) {
+    if (!normalizedContent || !isMeaningfulAnswerContent(normalizedContent)) {
       return null;
     }
 
@@ -251,25 +268,30 @@ function isTerminalUiLine(trimmed: string): boolean {
     /^bug\b/i,
     /^release-notes\b/i,
     /^[/\\]?release-notes/i,
+    /^(?:Puzzling|Calculating|Ebbing)(?:\.\.\.|…)?(?:\s*\([^)]*\))?$/i,
     /^gpt-[\w.-]+\s+with\s+/i,
     /^model\s+(changed|switched)/i,
     /^switched\s+(to|model)/i,
     /^\/model\b/i,
     /^API Usage/i,
     /^Billing/i,
+    /^\[[\w.-]+\]\s*\|/,
+    /\bContext\b.*\d+%/i,
+    /^\d+\s+CLAUDE\.md\s*\|\s*\d+\s+MCPs$/i,
+    /^←\s*for agents\S*$/i,
     /Resume\s*session/i,
     /^\(\s*\d+\s*of\s*\d+\s*\)/i,
     /Search(?:\.\.\.|…)/i,
     /\bHEAD[·:\s-]*\d+(?:\.\d+)?\s*KB/i,
     /(?:^|\s)\d+\s*(?:minutes?|hours?|days?)\s*ago[·\s-]*HEAD/i,
     /(?:Space to preview|Space\s*preview|Spacpreview|Ctrl\+B to only show current batch|Ctrl\+R to rename|Type to search|Esc to cancel)/i,
-    /^[\s\-─━═╭╮╰╯│┃┌┐└┘├┤┬┴┼╎╏]+$/,
-    /^[*✻✽✶✳✢·•]\s*(Baked|Wonked|Thought|Used|Interrupted|Galloping|Worked)\b/i,
+    /^[\s\-─━═╭╮╰╯│┃┌┐└┘├┤┬┴┼╎╏>›❯]+$/,
+    /^[*✻✽✶✳✢·•]\s*(Baked|Wonked|Thought|Used|Interrupted|Galloping|Worked|Ebbing)\b/i,
     /^Thought for/i,
     /^Baked for/i,
     /^Wonked for/i,
     /^Worked for/i,
-    /^Galloping/i,
+    /^Ebbing/i,
     /^⎿\s*Tip:/i,
     /^\?\s+for shortcuts/i,
     /^[-─━═]{5,}$/
@@ -283,19 +305,86 @@ function isUserInputLine(trimmed: string): boolean {
     || /^claude\b/i.test(trimmed);
 }
 
+function isEchoedPromptFragment(trimmed: string, prompt: string): boolean {
+  const normalizedLine = normalizePromptComparable(trimmed);
+  const normalizedPrompt = normalizePromptComparable(prompt);
+
+  if (!normalizedLine || !normalizedPrompt) {
+    return false;
+  }
+
+  return normalizedPrompt.includes(normalizedLine) || normalizedLine.includes(normalizedPrompt);
+}
+
+function normalizePromptComparable(value: string): string {
+  return cleanPromptTitle(value)
+    .replace(/[\s`*_~|:：。！？,.，、;；\-—–\[\]()（）{}<>《》]/g, '')
+    .toLowerCase();
+}
+
 function isPromptLine(trimmed: string): boolean {
   return /^[>›❯]\s*$/.test(trimmed) || /^\?\s+for shortcuts/i.test(trimmed);
 }
 
 function looksLikeAiAnswerLine(trimmed: string): boolean {
+  if (isTerminalUiLine(trimmed) || isUserInputLine(trimmed) || isLikelyGarbageFragment(trimmed)) {
+    return false;
+  }
+
   return /[一-鿿]/.test(trimmed)
     || /\$[^$]+\$/.test(trimmed)
     || /\\\[[\s\S]*?\\\]/.test(trimmed)
     || /\$\$/.test(trimmed)
     || /^#{1,6}\s+/.test(trimmed)
-    || /^[-*+]\s+/.test(trimmed)
+    || /^[-*+]\s+\S/.test(trimmed)
     || /^\d+\.\s+/.test(trimmed)
     || /^```/.test(trimmed);
+}
+
+function isMeaningfulAnswerContent(content: string): boolean {
+  const lines = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !isTerminalUiLine(line) && !isUserInputLine(line) && !isLikelyGarbageFragment(line));
+
+  if (lines.length === 0) {
+    return false;
+  }
+
+  if (lines.some((line) => /(?:\$[^$]+\$|\$\$|\\\[[\s\S]*?\\\])/.test(line) && /[A-Za-z0-9\\]/.test(line))) {
+    return true;
+  }
+
+  const plain = lines.join(' ')
+    .replace(/\$[^$]*\$/g, '')
+    .replace(/[\s`*_~|:：。！？,.，、;；\-—–\[\]()（）{}<>《》·•✻✽✶✳✢+\\/]/g, '');
+
+  return /[一-鿿A-Za-z0-9]/.test(plain);
+}
+
+function isLikelyGarbageFragment(trimmed: string): boolean {
+  if (!trimmed) {
+    return true;
+  }
+
+  if (/^(?:\.\.\.|…+)$/.test(trimmed)) {
+    return true;
+  }
+
+  if (/^[*✻✽✶✳✢·•+]$/.test(trimmed)) {
+    return true;
+  }
+
+  if (/^[*✻✽✶✳✢·•+]\S{0,3}$/.test(trimmed)) {
+    return true;
+  }
+
+  if (/^[A-Za-z]{1,4}(?:\.\.\.)?$/.test(trimmed) && !/^(AI|OK)$/i.test(trimmed)) {
+    return true;
+  }
+
+  return false;
 }
 
 function createTitle(content: string, index: number): string {
